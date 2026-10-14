@@ -49,6 +49,7 @@ pub fn run() {
             commands::sync_now,
             commands::update_settings,
             commands::mark_notification_read,
+            commands::send_thanks,
             commands::mark_all_notifications_read,
             commands::get_buzz_transactions,
             commands::preview_sound,

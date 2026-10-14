@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Local, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,8 @@ pub const MIN_POLLING_MINUTES: f64 = 1.0;
 pub const MAX_POLLING_MINUTES: f64 = 60.0;
 pub const MAX_VISIBLE_NOTIFICATIONS: usize = 300;
 pub const MAX_KNOWN_NOTIFICATION_IDS: usize = 300;
+pub const MAX_THANKS_MESSAGE_CHARS: usize = 300;
+pub const MAX_THANKS_LEDGER: usize = 5000;
 
 fn default_true() -> bool {
     true
@@ -18,6 +20,15 @@ fn default_true() -> bool {
 
 fn default_polling_minutes() -> f64 {
     1.0
+}
+
+fn default_thanks_message() -> String {
+    "thank you so much for the Buzz!".into()
+}
+
+/// Ledger key: one thanks per donor per image, whatever the number of tips.
+pub fn thanks_key(image_id: i64, user_id: i64) -> String {
+    format!("{image_id}:{user_id}")
 }
 
 /// Which notification groups are announced (sound, toast, pill). Disabled groups are marked read on sync.
@@ -105,6 +116,9 @@ pub struct Settings {
     pub start_with_windows: bool,
     #[serde(default = "default_true")]
     pub close_to_tray: bool,
+    /// Text after the leading @user in a thanks comment.
+    #[serde(default = "default_thanks_message")]
+    pub thanks_message: String,
 }
 
 impl Default for Settings {
@@ -117,6 +131,7 @@ impl Default for Settings {
             notification_types: NotificationTypes::default(),
             start_with_windows: false,
             close_to_tray: true,
+            thanks_message: default_thanks_message(),
         }
     }
 }
@@ -140,6 +155,14 @@ impl Settings {
                 return None;
             }
         }
+        self.thanks_message = self.thanks_message.trim().to_string();
+        let thanks_chars = self.thanks_message.chars().count();
+        if thanks_chars == 0
+            || thanks_chars > MAX_THANKS_MESSAGE_CHARS
+            || self.thanks_message.chars().any(char::is_control)
+        {
+            return None;
+        }
         Some(self)
     }
 }
@@ -154,6 +177,7 @@ pub struct SettingsPatch {
     pub notification_types: Option<NotificationTypes>,
     pub start_with_windows: Option<bool>,
     pub close_to_tray: Option<bool>,
+    pub thanks_message: Option<String>,
 }
 
 impl SettingsPatch {
@@ -176,6 +200,9 @@ impl SettingsPatch {
                 .start_with_windows
                 .unwrap_or(current.start_with_windows),
             close_to_tray: self.close_to_tray.unwrap_or(current.close_to_tray),
+            thanks_message: self
+                .thanks_message
+                .unwrap_or_else(|| current.thanks_message.clone()),
         }
         .validate()
     }
@@ -291,6 +318,14 @@ pub struct NotificationItem {
     pub url: Option<String>,
     pub thumbnail_url: Option<String>,
     pub thumbnail_kind: Option<String>,
+    /// Tip on an image: target image and donor, needed to post a thanks comment.
+    #[serde(default)]
+    pub tip_image_id: Option<i64>,
+    #[serde(default)]
+    pub tip_user_id: Option<i64>,
+    /// Filled from the thanks ledger when the snapshot is built; never persisted as truth.
+    #[serde(default)]
+    pub thanked: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -329,6 +364,9 @@ pub struct PersistedData {
     pub notification_tracker: NotificationTracker,
     pub daily_tracker: DailyTracker,
     pub rate_limit_retry_at: Option<i64>,
+    /// `thanks_key` -> ISO time of the thanks comment already posted.
+    #[serde(default)]
+    pub thanks_ledger: BTreeMap<String, String>,
 }
 
 impl Default for PersistedData {
@@ -345,6 +383,7 @@ impl Default for PersistedData {
             notification_tracker: NotificationTracker::default(),
             daily_tracker: DailyTracker::default(),
             rate_limit_retry_at: None,
+            thanks_ledger: BTreeMap::new(),
         }
     }
 }
@@ -397,7 +436,18 @@ impl AppSnapshot {
             buzz: data.buzz.clone(),
             buzz_change: data.buzz_change.clone(),
             today: data.today.clone(),
-            notifications: data.notifications.clone(),
+            notifications: {
+                let mut notifications = data.notifications.clone();
+                for item in &mut notifications.items {
+                    item.thanked =
+                        item.tip_image_id
+                            .zip(item.tip_user_id)
+                            .is_some_and(|(image, user)| {
+                                data.thanks_ledger.contains_key(&thanks_key(image, user))
+                            });
+                }
+                notifications
+            },
             sync: data.sync.clone(),
             settings: data.settings.clone(),
             permissions: permission_statuses(data.account.token_scope),
@@ -441,7 +491,7 @@ pub fn local_date_key() -> String {
 }
 
 pub fn permission_statuses(scope: Option<i64>) -> Vec<PermissionStatus> {
-    const REQUIREMENTS: [(&str, &str, &str, i64); 5] = [
+    const REQUIREMENTS: [(&str, &str, &str, i64); 6] = [
         ("UserRead", "UserRead", "Account identity and profile", 1),
         (
             "BuzzRead",
@@ -462,6 +512,12 @@ pub fn permission_statuses(scope: Option<i64>) -> Vec<PermissionStatus> {
             4_194_304,
         ),
         ("MediaRead", "MediaRead", "Notification thumbnails", 32),
+        (
+            "SocialWrite",
+            "SocialWrite",
+            "Post thank-you comments (optional)",
+            524_288,
+        ),
     ];
     REQUIREMENTS
         .into_iter()

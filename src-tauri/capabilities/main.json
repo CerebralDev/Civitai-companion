@@ -17,6 +17,7 @@
     "allow-sync-now",
     "allow-update-settings",
     "allow-mark-notification-read",
+    "allow-send-thanks",
     "allow-mark-all-notifications-read",
     "allow-get-buzz-transactions",
     "allow-preview-sound",

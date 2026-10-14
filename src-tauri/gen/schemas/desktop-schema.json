@@ -423,6 +423,12 @@
           "markdownDescription": "Enables the reset_cached_data command without any pre-configured scope."
         },
         {
+          "description": "Enables the send_thanks command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-send-thanks",
+          "markdownDescription": "Enables the send_thanks command without any pre-configured scope."
+        },
+        {
           "description": "Enables the sync_now command without any pre-configured scope.",
           "type": "string",
           "const": "allow-sync-now",
@@ -517,6 +523,12 @@
           "type": "string",
           "const": "deny-reset-cached-data",
           "markdownDescription": "Denies the reset_cached_data command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the send_thanks command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-send-thanks",
+          "markdownDescription": "Denies the send_thanks command without any pre-configured scope."
         },
         {
           "description": "Denies the sync_now command without any pre-configured scope.",

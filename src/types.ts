@@ -23,6 +23,7 @@ export interface Settings {
   notificationTypes: NotificationTypes;
   startWithWindows: boolean;
   closeToTray: boolean;
+  thanksMessage: string;
 }
 
 export interface SettingsPatch {
@@ -33,6 +34,7 @@ export interface SettingsPatch {
   notificationTypes?: NotificationTypes;
   startWithWindows?: boolean;
   closeToTray?: boolean;
+  thanksMessage?: string;
 }
 
 export interface PermissionStatus {
@@ -54,6 +56,9 @@ export interface NotificationItem {
   url: string | null;
   thumbnailUrl: string | null;
   thumbnailKind: string | null;
+  tipImageId: number | null;
+  tipUserId: number | null;
+  thanked: boolean;
 }
 
 export type BuzzAccountType = "blue" | "yellow" | "green";

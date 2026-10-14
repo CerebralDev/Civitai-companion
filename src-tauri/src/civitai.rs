@@ -239,6 +239,19 @@ impl CivitaiClient {
         Ok(())
     }
 
+    /// Posts a comment on an image through the site's own comment procedure (needs SocialWrite).
+    pub async fn post_image_comment(&self, image_id: i64, content: &str) -> AppResult<()> {
+        if image_id <= 0 {
+            return Err(AppError::InvalidInput);
+        }
+        self.trpc_mutate(
+            "commentv2.upsert",
+            json!({ "entityId": image_id, "entityType": "image", "content": content }),
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub async fn mark_notification_read(&self, id: &str) -> AppResult<()> {
         if id.is_empty() || id.len() > 256 || id.chars().any(char::is_control) {
             return Err(AppError::InvalidInput);
@@ -464,6 +477,7 @@ fn normalize_notification(value: Value) -> Option<FetchedNotification> {
         .cloned()
         .unwrap_or_else(|| json!({}));
     let (text, username, comment_preview, url) = present_notification(&kind, &category, &details);
+    let (tip_image_id, tip_user_id) = tip_target(&kind, &details);
     Some(FetchedNotification {
         public: NotificationItem {
             id,
@@ -477,9 +491,46 @@ fn normalize_notification(value: Value) -> Option<FetchedNotification> {
             url,
             thumbnail_url: None,
             thumbnail_kind: None,
+            tip_image_id,
+            tip_user_id,
+            thanked: false,
         },
         details,
     })
+}
+
+/// Image and donor of a tip on an image; `None` for any other notification.
+fn tip_target(kind: &str, details: &Value) -> (Option<i64>, Option<i64>) {
+    let on_image = kind.eq_ignore_ascii_case("tip-received")
+        && string(details, "entityType").is_some_and(|value| value.eq_ignore_ascii_case("image"));
+    if !on_image {
+        return (None, None);
+    }
+    (
+        integer(details, "entityId").filter(|id| *id > 0),
+        integer(details, "fromUserId").filter(|id| *id > 0),
+    )
+}
+
+/// Comment HTML: a real mention of the donor followed by the escaped custom message.
+pub fn thanks_comment_html(user_id: i64, username: &str, message: &str) -> Option<String> {
+    let valid_name = !username.is_empty()
+        && username.len() <= 80
+        && username
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'));
+    if user_id <= 0 || !valid_name || message.trim().is_empty() {
+        return None;
+    }
+    let escaped = message
+        .trim()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
+    Some(format!(
+        "<p><span data-type=\"mention\" data-id=\"mention:{user_id}\" data-label=\"{username}\">@{username}</span> {escaped}</p>"
+    ))
 }
 
 fn normalize_buzz(payload: &Value) -> Buzz {
@@ -1153,6 +1204,29 @@ mod tests {
                 .is_some_and(|url| url.starts_with("https://civitai.red/"))
         );
         assert!(item.public.text.len() <= 303);
+    }
+
+    #[test]
+    fn tips_on_images_expose_target_and_donor() {
+        let details =
+            json!({ "entityType": "Image", "entityId": 7, "fromUserId": 9, "user": "bob" });
+        assert_eq!(tip_target("tip-received", &details), (Some(7), Some(9)));
+        let model = json!({ "entityType": "Model", "entityId": 7, "fromUserId": 9 });
+        assert_eq!(tip_target("tip-received", &model), (None, None));
+        assert_eq!(tip_target("followed-by", &details), (None, None));
+    }
+
+    #[test]
+    fn thanks_comment_mentions_donor_and_escapes_message() {
+        let html = thanks_comment_html(9, "bob_1", "thanks <b>& more").unwrap();
+        assert_eq!(
+            html,
+            "<p><span data-type=\"mention\" data-id=\"mention:9\" data-label=\"bob_1\">@bob_1</span> thanks &lt;b&gt;&amp; more</p>"
+        );
+        assert!(thanks_comment_html(9, "bad name", "hi").is_none());
+        assert!(thanks_comment_html(9, "<x>", "hi").is_none());
+        assert!(thanks_comment_html(0, "bob", "hi").is_none());
+        assert!(thanks_comment_html(9, "bob", "  ").is_none());
     }
 
     #[test]

@@ -21,6 +21,8 @@ export const backend = {
     invoke("update_settings", { patch }),
   markRead: (notificationId: string): Promise<AppSnapshot> =>
     invoke("mark_notification_read", { notificationId }),
+  sendThanks: (notificationId: string): Promise<AppSnapshot> =>
+    invoke("send_thanks", { notificationId }),
   markAllRead: (): Promise<AppSnapshot> => invoke("mark_all_notifications_read"),
   buzzTransactions: (
     accountType: BuzzAccountType,

@@ -306,6 +306,7 @@ button:disabled { cursor: default; opacity: .45; }
 
 .icon-user { width: 18px; height: 18px; display: inline-block; flex: 0 0 auto; background-color: currentColor; color: #60a5fa; -webkit-mask: url("./assets/icons/user.svg") center/contain no-repeat; mask: url("./assets/icons/user.svg") center/contain no-repeat; }
 .icon-bolt { width: 16px; height: 22px; display: inline-block; flex: 0 0 auto; background-color: currentColor; -webkit-mask: url("./assets/icons/bolt.svg") center/contain no-repeat; mask: url("./assets/icons/bolt.svg") center/contain no-repeat; }
+.icon-heart { width: 10px; height: 10px; display: inline-block; flex: 0 0 auto; background-color: currentColor; -webkit-mask: url("./assets/icons/heart.svg") center/contain no-repeat; mask: url("./assets/icons/heart.svg") center/contain no-repeat; }
 .icon-comment, .icon-reaction, .icon-bell, .icon-sticker, .icon-collection, .icon-model-grid, .icon-settings, .icon-list-check { display: inline-block; flex: 0 0 auto; background-color: currentColor; }
 .icon-comment { -webkit-mask: url("./assets/icons/comment.svg") center/contain no-repeat; mask: url("./assets/icons/comment.svg") center/contain no-repeat; }
 .icon-reaction { -webkit-mask: url("./assets/icons/reaction.svg") center/contain no-repeat; mask: url("./assets/icons/reaction.svg") center/contain no-repeat; }
@@ -346,6 +347,11 @@ button:disabled { cursor: default; opacity: .45; }
 .notification-text strong { color: #b9dcff; font-weight: 600; }
 .notification-meta { align-items: center; gap: 4px; margin-top: 3px; font-size: 10px; }
 .notification-age { flex: 0 0 auto; }
+.thanks-button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 7px; border: 1px solid #fb7185; border-radius: 999px; color: #fb7185; font-size: 8px; font-weight: 700; letter-spacing: .04em; cursor: pointer; }
+.thanks-button:hover { background: rgba(251, 113, 133, .14); }
+.thanks-button:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 1px; }
+.thanks-button.done, .thanks-button.disabled { border-color: #4a4f5c; color: #7f8593; cursor: default; }
+.thanks-button.done:hover, .thanks-button.disabled:hover { background: transparent; }
 .thumbnail-frame { width: 42px; height: 42px; overflow: hidden; border-radius: 7px; background: #252832; }
 .thumbnail-frame.tip-thumbnail { outline: 2px solid #f59f00; outline-offset: 2px; }
 .thumbnail-frame.avatar-thumbnail-frame { width: 42px; height: 42px; border-radius: 50%; }

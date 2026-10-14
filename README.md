@@ -15,6 +15,7 @@ Civitai Companion keeps the parts of your Civitai account you check most often i
 - Supports configurable event sounds, sound previews, unread counters and mark-as-read actions.
 - Provides an on-demand Buzz transaction ledger for blue, yellow and green Buzz, including received/spent entries and linked image previews where available.
 - Runs from the Windows system tray: closing the window can keep synchronization active, while the tray menu offers **Show**, **Sync now** and **Quit**.
+- Adds a **THANKS** button to Buzz tips received on images: one click posts a comment on the image that mentions the donor (`@username`) followed by your own message, at most once per user and image. Requires the optional *SocialWrite* permission.
 - Optionally starts with Windows; autostart is disabled by default.
 - Includes account connection testing, a permission inspector, preference backup/import, cache reset and complete local-account-data removal.
 
@@ -24,15 +25,29 @@ All polling, authenticated API access, notification decisions and persistent sta
 
 1. Download either the installer or portable executable from [GitHub Releases](https://github.com/Tar-Tarj/Civitai-companion/releases).
 2. Open **Settings → Account & Security**.
-3. Select **Configure API key** and enter a Civitai API key with the permissions required for the features you want to use.
+3. Create an API key at <https://civitai.red/user/account/security> (see [API key permissions](#api-key-permissions)), select **Configure API key** and paste it.
 4. Run the connection test, then use **Sync now** or wait for the configured polling interval.
+
+## API key permissions
+
+Create the key at <https://civitai.red/user/account/security> and enable only the permissions below. **Settings → Account & Security** shows which of them your key currently has.
+
+| Permission | Needed for |
+|---|---|
+| UserRead | Account identity, avatar and username |
+| BuzzRead | Buzz balances and the transaction ledger |
+| NotificationsRead | Notification history and unread count |
+| NotificationsWrite | Marking notifications as read |
+| MediaRead | Thumbnails for notifications |
+| **SocialWrite** (optional) | The **THANKS** button, which posts a comment on your behalf |
+
+Without *SocialWrite* everything else works and the THANKS button is shown disabled. If you add it later, generate a new key with the extra permission and replace the old one in the app. The thank-you text is set in **Settings → Notifications & Sounds**. Civitai limits comments to roughly 10 per hour, and the app never posts anything without a click on THANKS.
 
 ## Downloads
 
-Version 1.0.23 is provided in three forms:
+Version 1.0.25 is provided in two forms:
 
 - NSIS setup executable for normal installation;
-- MSI package for Windows Installer deployments;
 - portable executable for users who do not want to install the application.
 
 Public builds are currently unsigned, so Windows SmartScreen may display a warning. Verify the SHA-256 values supplied with the release assets before running a download.

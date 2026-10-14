@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-send-thanks"
+description = "Enables the send_thanks command without any pre-configured scope."
+commands.allow = ["send_thanks"]
+
+[[permission]]
+identifier = "deny-send-thanks"
+description = "Denies the send_thanks command without any pre-configured scope."
+commands.deny = ["send_thanks"]

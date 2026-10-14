@@ -27,3 +27,4 @@ Thumbs.db
 
 # Internal test suite (kept locally only)
 /tests/
+/test-builds/

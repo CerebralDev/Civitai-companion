@@ -8,6 +8,7 @@ fn main() {
             "sync_now",
             "update_settings",
             "mark_notification_read",
+            "send_thanks",
             "mark_all_notifications_read",
             "get_buzz_transactions",
             "preview_sound",

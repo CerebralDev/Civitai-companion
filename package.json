@@ -1,6 +1,6 @@
 {
   "name": "civitai-companion-desktop",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "private": true,
   "type": "module",
   "engines": { "node": ">=22.6" },

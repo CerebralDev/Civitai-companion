@@ -8,13 +8,14 @@ use zeroize::Zeroizing;
 
 use crate::{
     audio,
-    civitai::CivitaiClient,
+    civitai::{CivitaiClient, thanks_comment_html},
     credentials,
     error::{AppError, AppResult},
     media::{self, ImagePayload},
     model::{
         AppSnapshot, BuzzAccountType, BuzzTransactionPage, ConnectionResult, MAX_BACKUP_BYTES,
-        PreferencesBackup, Settings, SettingsPatch, permission_statuses,
+        MAX_THANKS_LEDGER, PreferencesBackup, Settings, SettingsPatch, now_iso,
+        permission_statuses, thanks_key,
     },
     security::canonical_external_url,
     storage::AppRuntime,
@@ -168,6 +169,71 @@ async fn mark_notification_read_inner(
             });
         if changed {
             data.notifications.unread_count = data.notifications.unread_count.saturating_sub(1);
+        }
+        runtime.persist(&data)?;
+    }
+    sync::emit_state(app, runtime, None).await
+}
+
+#[tauri::command]
+pub async fn send_thanks(
+    app: AppHandle,
+    runtime: State<'_, Arc<AppRuntime>>,
+    notification_id: String,
+) -> CommandResult<AppSnapshot> {
+    public(send_thanks_inner(&app, &runtime, notification_id).await)
+}
+
+/// Posts "@donor <custom message>" once per donor and image. Only the notification id comes from the UI.
+async fn send_thanks_inner(
+    app: &AppHandle,
+    runtime: &AppRuntime,
+    notification_id: String,
+) -> AppResult<AppSnapshot> {
+    let _guard = runtime.thanks_guard.lock().await;
+    let (image_id, user_id, username, message, key, already_thanked) = {
+        let data = runtime.data.read().await;
+        let item = data
+            .notifications
+            .items
+            .iter()
+            .find(|item| item.id == notification_id)
+            .ok_or(AppError::InvalidInput)?;
+        let (image_id, user_id) = item
+            .tip_image_id
+            .zip(item.tip_user_id)
+            .ok_or(AppError::InvalidInput)?;
+        let key = thanks_key(image_id, user_id);
+        let already_thanked = data.thanks_ledger.contains_key(&key);
+        (
+            image_id,
+            user_id,
+            item.username.clone().ok_or(AppError::InvalidInput)?,
+            data.settings.thanks_message.clone(),
+            key,
+            already_thanked,
+        )
+    };
+    if already_thanked {
+        return sync::emit_state(app, runtime, None).await;
+    }
+    let content =
+        thanks_comment_html(user_id, &username, &message).ok_or(AppError::InvalidInput)?;
+    let client = CivitaiClient::new(credentials::read()?)?;
+    client.post_image_comment(image_id, &content).await?;
+    {
+        let mut data = runtime.data.write().await;
+        data.thanks_ledger.insert(key, now_iso());
+        while data.thanks_ledger.len() > MAX_THANKS_LEDGER {
+            let Some(oldest) = data
+                .thanks_ledger
+                .iter()
+                .min_by(|a, b| a.1.cmp(b.1))
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            data.thanks_ledger.remove(&oldest);
         }
         runtime.persist(&data)?;
     }

@@ -498,6 +498,7 @@ export class CompanionApp {
     const meta = element("span", "notification-meta");
     meta.append(element("span", "notification-age", relativeTime(item.createdAt)));
     if (item.commentPreview) meta.append(element("span", "comment-preview", `· “${item.commentPreview}”`));
+    if (item.tipImageId && item.tipUserId) meta.append(this.renderThanksButton(item));
     body.append(meta);
     row.append(body);
 
@@ -519,6 +520,36 @@ export class CompanionApp {
       row.append(frame);
     }
     return row;
+  }
+
+  // A span, not a button: it sits inside the notification row, which is already a button.
+  private renderThanksButton(item: NotificationItem): HTMLElement {
+    const allowed = this.snapshot.permissions.some((permission) => permission.id === "SocialWrite" && permission.granted);
+    const state = item.thanked ? " done" : allowed ? "" : " disabled";
+    const control = element("span", `thanks-button${state}`);
+    control.append(element("span", "icon-heart"), document.createTextNode(item.thanked ? "THANKED" : "THANKS"));
+    control.setAttribute("role", "button");
+    if (item.thanked) {
+      control.title = "You already thanked this user on this image";
+      return control;
+    }
+    if (!allowed) {
+      control.title = "Add the SocialWrite permission to your API key to post thank-you comments";
+      control.setAttribute("aria-disabled", "true");
+      return control;
+    }
+    control.tabIndex = 0;
+    control.title = "Post a thank-you comment on the image";
+    const send = (event: Event): void => {
+      event.stopPropagation();
+      event.preventDefault();
+      void this.run(() => backend.sendThanks(item.id));
+    };
+    control.addEventListener("click", send);
+    control.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") send(event);
+    });
+    return control;
   }
 
   private showFollowerFallback(frame: HTMLElement): void {
@@ -684,6 +715,23 @@ export class CompanionApp {
         }),
       ));
     }
+    panel.append(element("h3", "section-title", "Thank-you comment"));
+    panel.append(element("p", "help", "The THANKS button on a Buzz tip posts “@username” followed by this text on the tipped image, once per user and image. It needs the SocialWrite permission on your API key. Civitai limits comments to about 10 per hour."));
+    const thanks = element("input", "text-input");
+    thanks.type = "text";
+    thanks.maxLength = 300;
+    thanks.value = this.snapshot.settings.thanksMessage;
+    thanks.setAttribute("aria-label", "Thank-you comment text");
+    thanks.addEventListener("change", () => {
+      const value = thanks.value.trim();
+      if (value) {
+        void this.saveSettings({ thanksMessage: value });
+      } else {
+        thanks.value = this.snapshot.settings.thanksMessage;
+        this.showNotice("The thank-you text cannot be empty.", true);
+      }
+    });
+    panel.append(thanks);
     panel.append(element("h3", "section-title", "Event sounds"));
     panel.append(this.soundRow("Site activity", "siteActivity"));
     panel.append(this.soundRow("Buzz tips", "tips"));

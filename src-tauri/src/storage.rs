@@ -22,6 +22,8 @@ const MAX_STATE_BYTES: u64 = 8 * 1024 * 1024;
 pub struct AppRuntime {
     pub data: RwLock<PersistedData>,
     pub sync_guard: Mutex<()>,
+    /// Serializes thanks comments so a double click cannot post twice.
+    pub thanks_guard: Mutex<()>,
     pub scheduler_wakeup: Notify,
     pub image_fetch_guard: Semaphore,
     credential_configured: AtomicBool,
@@ -43,6 +45,7 @@ impl AppRuntime {
         Ok(Self {
             data: RwLock::new(data),
             sync_guard: Mutex::new(()),
+            thanks_guard: Mutex::new(()),
             scheduler_wakeup: Notify::new(),
             image_fetch_guard: Semaphore::new(4),
             credential_configured: AtomicBool::new(credential_configured),

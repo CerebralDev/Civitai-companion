@@ -22,6 +22,7 @@ use crate::{
 
 const RECENT_NOTIFICATION_LIMIT: usize = 30;
 const MAX_NOTIFICATION_PAGES: usize = 10;
+const MAX_MUTED_MARKS_PER_SYNC: usize = 100;
 const NOTIFICATION_LOOKBACK_DAYS: i64 = 5;
 const NATIVE_NOTIFICATION_LIFETIME: Duration = Duration::from_secs(4);
 
@@ -69,6 +70,8 @@ pub async fn synchronize(
                     last_attempt: Some(attempted_at),
                     error: Some("Configure a Civitai API key in Settings.".into()),
                     error_code: Some("NO_AUTH".into()),
+                    error_status: 0,
+                    updating: false,
                     ..data.sync.clone()
                 };
                 runtime.persist(&data)?;
@@ -184,6 +187,20 @@ async fn perform_sync(
         all_items.extend(page.items);
         cursor = page.next_cursor;
     }
+    // Groups switched off in Settings are marked read on the server; failures retry on the next sync.
+    let mut muted_unread = 0;
+    for item in all_items.iter_mut().filter(|item| {
+        !item.public.read
+            && !settings.notification_types.allows(&item.public)
+            && (settings.thread_responses_enabled || item.public.kind != "new-thread-response")
+    }) {
+        muted_unread += 1;
+        if muted_unread <= MAX_MUTED_MARKS_PER_SYNC
+            && client.mark_notification_read(&item.public.id).await.is_ok()
+        {
+            item.public.read = true;
+        }
+    }
     apply_cached_thumbnails(&mut all_items, &previous_items);
     client.add_thumbnails(&mut all_items).await;
 
@@ -194,6 +211,7 @@ async fn perform_sync(
         all_items
             .iter()
             .filter(|item| !known.contains(&item.public.id))
+            .filter(|item| settings.notification_types.allows(&item.public))
             .filter(|item| {
                 settings.thread_responses_enabled || item.public.kind != "new-thread-response"
             })
@@ -242,7 +260,7 @@ async fn perform_sync(
             .is_some_and(|time| time.date_naive() < Local::now().date_naive());
     let now = now_iso();
     let buzz_change = positive_buzz_change(&previous_buzz, &buzz, &now);
-    let unread_count = unread_count.saturating_sub(ignored_unread);
+    let unread_count = unread_count.saturating_sub(ignored_unread + muted_unread);
 
     {
         let mut data = runtime.data.write().await;

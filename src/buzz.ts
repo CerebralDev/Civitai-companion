@@ -39,10 +39,10 @@ export function formatCompactBuzz(value: number): string {
 
 /** Font sizes tried, largest first, until the header Buzz pill fits. */
 export const BUZZ_FONT_SIZES: ReadonlyArray<number> = [13, 12, 11, 10, 9];
-/** Grid gap between the profile column and the stats column in .account-summary. */
-export const BUZZ_HEADER_COLUMN_GAP = 8;
-/** Minimum width reserved for the avatar and username column in .account-summary. */
-export const BUZZ_HEADER_MIN_PROFILE_WIDTH = 120;
+/** Grid column gap in .account-summary. */
+export const BUZZ_HEADER_COLUMN_GAP = 9;
+/** Avatar column width in .account-summary; the Buzz pill spans the columns to its right. */
+export const BUZZ_HEADER_AVATAR_WIDTH = 54;
 
 export function fitBuzzFontSize(available: number, widthAt: (fontPx: number) => number): number {
   let chosen = BUZZ_FONT_SIZES[0] ?? 13;

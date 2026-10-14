@@ -7,6 +7,7 @@ async function main(): Promise<void> {
   const root = document.querySelector<HTMLElement>("#app");
   if (!root) throw new Error("Application root is missing");
 
+  document.addEventListener("contextmenu", (event) => event.preventDefault());
   document.addEventListener("dragover", (event) => event.preventDefault());
   document.addEventListener("drop", (event) => event.preventDefault());
   preloadSounds();

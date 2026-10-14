@@ -2,7 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { backend } from "./bridge";
 import {
   BUZZ_HEADER_COLUMN_GAP,
-  BUZZ_HEADER_MIN_PROFILE_WIDTH,
+  BUZZ_HEADER_AVATAR_WIDTH,
   buzzBalanceTooltip,
   buzzKindLabel,
   completedSyncChanged,
@@ -27,6 +27,7 @@ import type {
   Filter,
   NotificationItem,
   NotificationSounds,
+  NotificationTypes,
   PermissionStatus,
   SettingsPage,
   SoundId,
@@ -41,6 +42,15 @@ const FILTERS: ReadonlyArray<{ id: Filter; label: string; iconClass?: string }> 
   { id: "tips", label: "Buzz tips", iconClass: "icon-bolt" },
   { id: "models", label: "Models Updates", iconClass: "icon-model-grid" },
   { id: "updates", label: "Miscellaneous", iconClass: "icon-bell" },
+];
+
+const NOTIFICATION_TYPE_LABELS: ReadonlyArray<[keyof NotificationTypes, string]> = [
+  ["comments", "Comments"],
+  ["followers", "New followers"],
+  ["milestones", "Reactions milestones"],
+  ["models", "Models"],
+  ["collections", "Collections updates"],
+  ["articles", "Articles"],
 ];
 
 const SETTINGS_PAGES: ReadonlyArray<{ id: Exclude<SettingsPage, "root">; title: string; detail: string }> = [
@@ -118,7 +128,7 @@ export class CompanionApp {
     if (!summary || !stack) return;
     const styles = window.getComputedStyle(summary);
     const inner = summary.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight);
-    const available = inner - BUZZ_HEADER_COLUMN_GAP - BUZZ_HEADER_MIN_PROFILE_WIDTH;
+    const available = inner - BUZZ_HEADER_COLUMN_GAP - BUZZ_HEADER_AVATAR_WIDTH;
     fitBuzzFontSize(available, (fontPx) => {
       stack.style.setProperty("--buzz-font", `${fontPx}px`);
       return stack.getBoundingClientRect().width;
@@ -662,6 +672,18 @@ export class CompanionApp {
       this.snapshot.settings.windowsNotificationsEnabled,
       (checked) => void this.saveSettings({ windowsNotificationsEnabled: checked }),
     ));
+    panel.append(element("h3", "section-title", "Notify me about"));
+    panel.append(element("p", "help", "Unchecked types get no sound, pill or Windows toast, and are marked as read automatically."));
+    for (const [key, label] of NOTIFICATION_TYPE_LABELS) {
+      panel.append(this.toggleRow(
+        label,
+        "",
+        this.snapshot.settings.notificationTypes[key],
+        (checked) => void this.saveSettings({
+          notificationTypes: { ...this.snapshot.settings.notificationTypes, [key]: checked },
+        }),
+      ));
+    }
     panel.append(element("h3", "section-title", "Event sounds"));
     panel.append(this.soundRow("Site activity", "siteActivity"));
     panel.append(this.soundRow("Buzz tips", "tips"));
@@ -862,10 +884,17 @@ export class CompanionApp {
     }
   }
 
-  private async run(
+  private runQueue: Promise<void> = Promise.resolve();
+
+  // Serialized so an action fired during another one (e.g. mark-as-read during a sync) waits instead of being dropped.
+  private run(action: () => Promise<AppSnapshot>): Promise<void> {
+    this.runQueue = this.runQueue.then(() => this.runNow(action));
+    return this.runQueue;
+  }
+
+  private async runNow(
     action: () => Promise<AppSnapshot>,
   ): Promise<void> {
-    if (this.busy) return;
     this.busy = true;
     this.render();
     try {

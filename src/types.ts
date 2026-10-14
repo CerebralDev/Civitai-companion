@@ -6,11 +6,21 @@ export interface NotificationSounds {
   followers: SoundId | null;
 }
 
+export interface NotificationTypes {
+  comments: boolean;
+  followers: boolean;
+  milestones: boolean;
+  models: boolean;
+  collections: boolean;
+  articles: boolean;
+}
+
 export interface Settings {
   threadResponsesEnabled: boolean;
   pollingMinutes: number;
   windowsNotificationsEnabled: boolean;
   notificationSounds: NotificationSounds;
+  notificationTypes: NotificationTypes;
   startWithWindows: boolean;
   closeToTray: boolean;
 }
@@ -20,6 +30,7 @@ export interface SettingsPatch {
   pollingMinutes?: number;
   windowsNotificationsEnabled?: boolean;
   notificationSounds?: NotificationSounds;
+  notificationTypes?: NotificationTypes;
   startWithWindows?: boolean;
   closeToTray?: boolean;
 }

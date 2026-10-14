@@ -20,6 +20,56 @@ fn default_polling_minutes() -> f64 {
     1.0
 }
 
+/// Which notification groups are announced (sound, toast, pill). Disabled groups are marked read on sync.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct NotificationTypes {
+    pub comments: bool,
+    pub followers: bool,
+    pub milestones: bool,
+    pub models: bool,
+    pub collections: bool,
+    pub articles: bool,
+}
+
+impl Default for NotificationTypes {
+    fn default() -> Self {
+        Self {
+            comments: true,
+            followers: true,
+            milestones: true,
+            models: true,
+            collections: true,
+            articles: true,
+        }
+    }
+}
+
+impl NotificationTypes {
+    /// Mirrors the grouping of `notification-filters.ts`; kinds outside the six groups are always allowed.
+    pub fn allows(&self, item: &NotificationItem) -> bool {
+        let kind = item.kind.to_ascii_lowercase();
+        let category = item.category.to_ascii_lowercase();
+        if kind == "followed-by" {
+            self.followers
+        } else if kind.contains("comment") || category == "comment" {
+            self.comments
+        } else if kind.contains("reaction") || category == "milestone" {
+            self.milestones
+        } else if kind.starts_with("new-model-")
+            || matches!(kind.as_str(), "early-access-complete" | "old-draft")
+        {
+            self.models
+        } else if kind.starts_with("collection-") {
+            self.collections
+        } else if kind.contains("article") {
+            self.articles
+        } else {
+            true
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NotificationSounds {
@@ -50,6 +100,8 @@ pub struct Settings {
     #[serde(default)]
     pub notification_sounds: NotificationSounds,
     #[serde(default)]
+    pub notification_types: NotificationTypes,
+    #[serde(default)]
     pub start_with_windows: bool,
     #[serde(default = "default_true")]
     pub close_to_tray: bool,
@@ -62,6 +114,7 @@ impl Default for Settings {
             polling_minutes: default_polling_minutes(),
             windows_notifications_enabled: true,
             notification_sounds: NotificationSounds::default(),
+            notification_types: NotificationTypes::default(),
             start_with_windows: false,
             close_to_tray: true,
         }
@@ -98,6 +151,7 @@ pub struct SettingsPatch {
     pub polling_minutes: Option<f64>,
     pub windows_notifications_enabled: Option<bool>,
     pub notification_sounds: Option<NotificationSounds>,
+    pub notification_types: Option<NotificationTypes>,
     pub start_with_windows: Option<bool>,
     pub close_to_tray: Option<bool>,
 }
@@ -115,6 +169,9 @@ impl SettingsPatch {
             notification_sounds: self
                 .notification_sounds
                 .unwrap_or_else(|| current.notification_sounds.clone()),
+            notification_types: self
+                .notification_types
+                .unwrap_or_else(|| current.notification_types.clone()),
             start_with_windows: self
                 .start_with_windows
                 .unwrap_or(current.start_with_windows),
@@ -460,6 +517,36 @@ mod tests {
         )
         .unwrap();
         assert!(settings.close_to_tray);
+        assert_eq!(settings.notification_types, NotificationTypes::default());
+    }
+
+    #[test]
+    fn disabled_notification_groups_are_matched_by_kind() {
+        let item = |kind: &str, category: &str| NotificationItem {
+            kind: kind.into(),
+            category: category.into(),
+            ..NotificationItem::default()
+        };
+        let off = NotificationTypes {
+            comments: false,
+            followers: false,
+            milestones: false,
+            models: false,
+            collections: false,
+            articles: false,
+        };
+        for (kind, category) in [
+            ("new-comment-reply", "Comment"),
+            ("followed-by", "Update"),
+            ("image-reaction-milestone", "Milestone"),
+            ("new-model-version", "Update"),
+            ("collection-update", "Update"),
+            ("new-article-from-following", "Update"),
+        ] {
+            assert!(!off.allows(&item(kind, category)), "{kind}");
+            assert!(NotificationTypes::default().allows(&item(kind, category)));
+        }
+        assert!(off.allows(&item("tip-received", "Buzz")));
     }
 
     #[test]

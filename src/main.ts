@@ -10,6 +10,11 @@ async function main(): Promise<void> {
   document.addEventListener("contextmenu", (event) => event.preventDefault());
   document.addEventListener("dragover", (event) => event.preventDefault());
   document.addEventListener("drop", (event) => event.preventDefault());
+  if (import.meta.env.VITE_TEST_PANEL === "1" && new URLSearchParams(location.search).get("panel") === "test") {
+    const { renderTestPanel } = await import("./test-panel");
+    renderTestPanel(root);
+    return;
+  }
   preloadSounds();
 
   try {

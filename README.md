@@ -45,7 +45,7 @@ Without *SocialWrite* everything else works and the THANKS button is shown disab
 
 ## Downloads
 
-Version 1.0.25 is provided in two forms:
+Version 1.0.26 is provided in two forms:
 
 - NSIS setup executable for normal installation;
 - portable executable for users who do not want to install the application.

@@ -1,0 +1,16 @@
+{
+  "app": {
+    "security": {
+      "capabilities": [
+        "main-capability",
+        {
+          "identifier": "test-panel-capability",
+          "description": "Debug builds only (feature test-panel): open the detached test window and fire fake local notifications.",
+          "local": true,
+          "windows": ["main", "test-panel"],
+          "permissions": ["allow-open-test-panel", "allow-send-test-notification"]
+        }
+      ]
+    }
+  }
+}

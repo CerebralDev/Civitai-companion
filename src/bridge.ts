@@ -23,6 +23,9 @@ export const backend = {
     invoke("mark_notification_read", { notificationId }),
   sendThanks: (notificationId: string): Promise<AppSnapshot> =>
     invoke("send_thanks", { notificationId }),
+  openTestPanel: (): Promise<void> => invoke("open_test_panel"),
+  sendTestNotification: (kind: string): Promise<string> =>
+    invoke("send_test_notification", { kind }),
   markAllRead: (): Promise<AppSnapshot> => invoke("mark_all_notifications_read"),
   buzzTransactions: (
     accountType: BuzzAccountType,

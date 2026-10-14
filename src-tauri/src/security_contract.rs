@@ -42,6 +42,30 @@ fn capability_exposes_only_required_window_and_state_controls() {
 }
 
 #[test]
+fn test_panel_capability_is_debug_only_and_local() {
+    // The capability lives only in the debug config; a release config must not know it.
+    let release: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+    assert!(
+        !release["app"]["security"]["capabilities"]
+            .to_string()
+            .contains("test-panel")
+    );
+    assert!(!std::path::Path::new("capabilities/test-panel.json").exists());
+    let debug: Value = serde_json::from_str(include_str!("../tauri.test-panel.conf.json")).unwrap();
+    let capability = &debug["app"]["security"]["capabilities"][1];
+    assert_eq!(capability["identifier"], "test-panel-capability");
+    assert_eq!(capability["local"], true);
+    assert_eq!(
+        capability["windows"],
+        serde_json::json!(["main", "test-panel"])
+    );
+    assert_eq!(
+        capability["permissions"],
+        serde_json::json!(["allow-open-test-panel", "allow-send-test-notification"])
+    );
+}
+
+#[test]
 fn every_registered_command_has_an_acl_permission() {
     let build = include_str!("../build.rs");
     let capability: Value =

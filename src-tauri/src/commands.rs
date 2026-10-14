@@ -1,7 +1,11 @@
 use std::{io::Write, path::Path, sync::Arc};
 
+#[cfg(feature = "test-panel")]
+use crate::security;
 use atomic_write_file::AtomicWriteFile;
 use tauri::{AppHandle, Manager, State};
+#[cfg(feature = "test-panel")]
+use tauri::{WebviewUrl, WebviewWindowBuilder, webview::NewWindowResponse};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 use zeroize::Zeroizing;
@@ -238,6 +242,47 @@ async fn send_thanks_inner(
         runtime.persist(&data)?;
     }
     sync::emit_state(app, runtime, None).await
+}
+
+/// Opens the detached notification test window; the main window can stay minimized.
+#[cfg(feature = "test-panel")]
+#[tauri::command]
+pub async fn open_test_panel(app: AppHandle) -> CommandResult<()> {
+    public(open_test_panel_inner(&app))
+}
+
+#[cfg(feature = "test-panel")]
+fn open_test_panel_inner(app: &AppHandle) -> AppResult<()> {
+    if let Some(window) = app.get_webview_window("test-panel") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        app,
+        "test-panel",
+        WebviewUrl::App("index.html?panel=test".into()),
+    )
+    .title("Notification test panel")
+    .inner_size(380.0, 520.0)
+    .min_inner_size(340.0, 360.0)
+    .maximizable(false)
+    .on_navigation(security::is_allowed_webview_navigation)
+    .on_new_window(|_, _| NewWindowResponse::Deny)
+    .build()
+    .map(|_| ())
+    .map_err(|_| AppError::Operation)
+}
+
+#[cfg(feature = "test-panel")]
+#[tauri::command]
+pub async fn send_test_notification(
+    app: AppHandle,
+    runtime: State<'_, Arc<AppRuntime>>,
+    kind: String,
+) -> CommandResult<String> {
+    public(sync::send_test_notification(&app, &runtime, &kind).await)
 }
 
 #[tauri::command]

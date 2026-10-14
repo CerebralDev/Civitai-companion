@@ -50,6 +50,10 @@ pub fn run() {
             commands::update_settings,
             commands::mark_notification_read,
             commands::send_thanks,
+            #[cfg(feature = "test-panel")]
+            commands::open_test_panel,
+            #[cfg(feature = "test-panel")]
+            commands::send_test_notification,
             commands::mark_all_notifications_read,
             commands::get_buzz_transactions,
             commands::preview_sound,
@@ -137,7 +141,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let runtime = window.state::<Arc<AppRuntime>>();
-                if runtime.close_to_tray() {
+                if window.label() == "main" && runtime.close_to_tray() {
                     api.prevent_close();
                     let _ = window.hide();
                 }

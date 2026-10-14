@@ -208,15 +208,7 @@ async fn perform_sync(
     let new_items = if baseline {
         Vec::new()
     } else {
-        all_items
-            .iter()
-            .filter(|item| !known.contains(&item.public.id))
-            .filter(|item| settings.notification_types.allows(&item.public))
-            .filter(|item| {
-                settings.thread_responses_enabled || item.public.kind != "new-thread-response"
-            })
-            .map(|item| item.public.clone())
-            .collect::<Vec<_>>()
+        announceable_items(&all_items, &known, &settings, cutoff)
     };
     let known_ids = merge_known_ids(&tracker.known_ids, &all_items);
     let filtered = all_items
@@ -307,6 +299,27 @@ pub async fn test_connection() -> AppResult<(String, Option<i64>)> {
         client.get_unread_count(),
     )?;
     Ok((identity.username, identity.token_scope))
+}
+
+/// Items worth a toast and a sound: unseen, in an enabled group, and inside the visible window.
+/// Paging deeper as the window slides surfaces unseen notifications older than `cutoff`; they are
+/// not listed, so announcing them would show events the user cannot find.
+fn announceable_items(
+    all_items: &[FetchedNotification],
+    known: &HashSet<String>,
+    settings: &crate::model::Settings,
+    cutoff: DateTime<Utc>,
+) -> Vec<NotificationItem> {
+    all_items
+        .iter()
+        .filter(|item| !known.contains(&item.public.id))
+        .filter(|item| notification_time(item).is_some_and(|time| time >= cutoff))
+        .filter(|item| settings.notification_types.allows(&item.public))
+        .filter(|item| {
+            settings.thread_responses_enabled || item.public.kind != "new-thread-response"
+        })
+        .map(|item| item.public.clone())
+        .collect()
 }
 
 fn merge_known_ids(previous: &[String], fetched: &[FetchedNotification]) -> Vec<String> {
@@ -407,6 +420,100 @@ fn error_code_and_status(error: &AppError) -> (&'static str, u16) {
         AppError::ServiceUnavailable => ("SERVICE_UNAVAILABLE", 503),
         _ => ("API_ERROR", 0),
     }
+}
+
+/// Fake notifications for the test panel; `None` for an unknown kind.
+#[cfg(feature = "test-panel")]
+fn test_items(kind: &str) -> Option<Vec<NotificationItem>> {
+    let fake = |kind: &str, category: &str, text: &str, preview: &str| NotificationItem {
+        id: format!("test-{kind}"),
+        kind: kind.into(),
+        category: category.into(),
+        text: text.into(),
+        username: Some("test_user".into()),
+        comment_preview: preview.into(),
+        created_at: Some(now_iso()),
+        ..NotificationItem::default()
+    };
+    let follower = || fake("followed-by", "Update", "test_user has followed you!", "");
+    let tip = || {
+        fake(
+            "tip-received",
+            "Buzz",
+            "test_user tipped you 100 Yellow Buzz",
+            "",
+        )
+    };
+    let comment = || {
+        fake(
+            "new-comment-reply",
+            "Comment",
+            "test_user replied to your comment",
+            "This is a test reply",
+        )
+    };
+    Some(match kind {
+        "follower" => vec![follower()],
+        "comment" => vec![comment()],
+        "tip" => vec![tip()],
+        "milestone" => vec![fake(
+            "image-reaction-milestone",
+            "Milestone",
+            "Your image has received 100 reactions",
+            "",
+        )],
+        "model" => vec![fake(
+            "new-model-version",
+            "Update",
+            "test_user: Test Model · new version v2",
+            "",
+        )],
+        "collection" => vec![fake(
+            "collection-update",
+            "Update",
+            "Collection update: Test Collection",
+            "",
+        )],
+        "burst" => vec![follower(), tip(), comment()],
+        _ => return None,
+    })
+}
+
+/// Fires fake notifications through the real toast and sound path, honouring the same settings as a sync.
+#[cfg(feature = "test-panel")]
+pub async fn send_test_notification(
+    app: &AppHandle,
+    runtime: &AppRuntime,
+    kind: &str,
+) -> AppResult<String> {
+    let items = test_items(kind).ok_or(AppError::InvalidInput)?;
+    let settings = runtime.data.read().await.settings.clone();
+    let items = items
+        .into_iter()
+        .filter(|item| settings.notification_types.allows(item))
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return Ok("Nothing sent: this group is switched off under \"Notify me about\".".into());
+    }
+    let mut report = Vec::new();
+    if settings.windows_notifications_enabled {
+        deliver_native_notifications(app, &items);
+        report.push("toast sent");
+    } else {
+        report.push("toast skipped (Windows notifications are off)");
+    }
+    match select_sound(&items, &settings.notification_sounds, false) {
+        Some(sound_id) => {
+            if crate::audio::play_notification_sound_async(sound_id.clone()).await {
+                report.push("sound played");
+            } else {
+                emit_state(app, runtime, Some(sound_id)).await?;
+                report.push("sound sent to the main window");
+            }
+        }
+        None => report.push("sound is off for this group"),
+    }
+    Ok(report.join(", "))
 }
 
 fn select_sound(
@@ -526,6 +633,49 @@ mod tests {
             kind: kind.into(),
             ..NotificationItem::default()
         }
+    }
+
+    #[test]
+    fn unseen_notifications_older_than_the_window_are_not_announced() {
+        let at = |id: &str, kind: &str, age_days: i64| {
+            let mut public = notification(id, kind);
+            public.created_at = Some((Utc::now() - chrono::Duration::days(age_days)).to_rfc3339());
+            FetchedNotification {
+                public,
+                details: serde_json::json!({}),
+            }
+        };
+        let fetched = vec![
+            at("fresh", "followed-by", 0),
+            at("old", "followed-by", 6),
+            at("seen", "followed-by", 1),
+        ];
+        let known = HashSet::from(["seen".to_string()]);
+        let cutoff = Utc::now() - chrono::Duration::days(NOTIFICATION_LOOKBACK_DAYS);
+        let announced = announceable_items(&fetched, &known, &Settings::default(), cutoff);
+        assert_eq!(announced.len(), 1);
+        assert_eq!(announced[0].id, "fresh");
+    }
+
+    #[test]
+    #[cfg(feature = "test-panel")]
+    fn test_panel_items_cover_each_toast_title() {
+        let title = |kind: &str| {
+            native_notification_content(&test_items(kind).unwrap()).map(|(title, _)| title)
+        };
+        assert_eq!(title("follower").as_deref(), Some("New follower"));
+        assert_eq!(title("comment").as_deref(), Some("New comment"));
+        assert_eq!(title("tip").as_deref(), Some("Buzz tip received"));
+        assert_eq!(title("milestone").as_deref(), Some("Reaction milestone"));
+        assert_eq!(title("model").as_deref(), Some("Civitai update"));
+        assert_eq!(title("collection").as_deref(), Some("Civitai update"));
+        assert_eq!(
+            native_notification_content(&test_items("burst").unwrap())
+                .unwrap()
+                .1,
+            "3 new notifications"
+        );
+        assert!(test_items("unknown").is_none());
     }
 
     #[test]

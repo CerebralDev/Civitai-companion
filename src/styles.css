@@ -347,6 +347,10 @@ button:disabled { cursor: default; opacity: .45; }
 .notification-text strong { color: #b9dcff; font-weight: 600; }
 .notification-meta { align-items: center; gap: 4px; margin-top: 3px; font-size: 10px; }
 .notification-age { flex: 0 0 auto; }
+.test-shell { padding: 14px; gap: 10px; border-radius: 0; }
+.test-title { margin: 0; font-size: 14px; }
+.test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.test-log { flex: 1; min-height: 80px; overflow-y: auto; padding: 8px; border: 1px solid #30343e; border-radius: 8px; background: #111319; color: #b7bac4; font: 10px/1.5 ui-monospace, Consolas, monospace; }
 .thanks-button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 7px; border: 1px solid #fb7185; border-radius: 999px; color: #fb7185; font-size: 8px; font-weight: 700; letter-spacing: .04em; cursor: pointer; }
 .thanks-button:hover { background: rgba(251, 113, 133, .14); }
 .thanks-button:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 1px; }

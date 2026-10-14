@@ -795,6 +795,13 @@ export class CompanionApp {
       this.snapshot.settings.startWithWindows,
       (checked) => void this.saveSettings({ startWithWindows: checked }),
     ));
+    if (import.meta.env.VITE_TEST_PANEL === "1") {
+      const testPanel = element("div", "field-row");
+      const testCopy = element("span");
+      testCopy.append(element("strong", "", "Notification test panel"), element("small", "", "Detached window to try toasts and sounds (debug build)"));
+      testPanel.append(testCopy, button("secondary mini-button", "Open", () => void backend.openTestPanel().catch((error) => this.showNotice(this.errorMessage(error), true))));
+      panel.append(testPanel);
+    }
     const polling = element("label", "field-row");
     const copy = element("span");
     copy.append(element("strong", "", "Polling interval"), element("small", "", "Between 1 and 60 minutes"));

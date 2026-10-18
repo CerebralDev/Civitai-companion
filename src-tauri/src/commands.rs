@@ -228,17 +228,54 @@ async fn send_thanks_inner(
     {
         let mut data = runtime.data.write().await;
         data.thanks_ledger.insert(key, now_iso());
-        while data.thanks_ledger.len() > MAX_THANKS_LEDGER {
-            let Some(oldest) = data
-                .thanks_ledger
-                .iter()
-                .min_by(|a, b| a.1.cmp(b.1))
-                .map(|(key, _)| key.clone())
-            else {
-                break;
-            };
-            data.thanks_ledger.remove(&oldest);
+        trim_thanks_ledger(&mut data);
+        runtime.persist(&data)?;
+    }
+    sync::emit_state(app, runtime, None).await
+}
+
+fn trim_thanks_ledger(data: &mut crate::model::PersistedData) {
+    while data.thanks_ledger.len() > MAX_THANKS_LEDGER {
+        let Some(oldest) = data
+            .thanks_ledger
+            .iter()
+            .min_by(|a, b| a.1.cmp(b.1))
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        data.thanks_ledger.remove(&oldest);
+    }
+}
+
+/// Records every tip on an image in the list as already thanked (for thanks sent by hand on the site).
+#[tauri::command]
+pub async fn mark_all_tips_thanked(
+    app: AppHandle,
+    runtime: State<'_, Arc<AppRuntime>>,
+) -> CommandResult<AppSnapshot> {
+    public(mark_all_tips_thanked_inner(&app, &runtime).await)
+}
+
+async fn mark_all_tips_thanked_inner(
+    app: &AppHandle,
+    runtime: &AppRuntime,
+) -> AppResult<AppSnapshot> {
+    let _guard = runtime.thanks_guard.lock().await;
+    {
+        let mut data = runtime.data.write().await;
+        let now = now_iso();
+        let keys = data
+            .notifications
+            .items
+            .iter()
+            .filter_map(|item| item.tip_image_id.zip(item.tip_user_id))
+            .map(|(image, user)| thanks_key(image, user))
+            .collect::<Vec<_>>();
+        for key in keys {
+            data.thanks_ledger.entry(key).or_insert_with(|| now.clone());
         }
+        trim_thanks_ledger(&mut data);
         runtime.persist(&data)?;
     }
     sync::emit_state(app, runtime, None).await
@@ -355,6 +392,35 @@ pub async fn fetch_civitai_image(
     result
 }
 
+/// Version of a newer GitHub release, or `None` when up to date, disabled or offline.
+#[tauri::command]
+pub async fn check_for_update(
+    runtime: State<'_, Arc<AppRuntime>>,
+) -> CommandResult<Option<String>> {
+    if !runtime.data.read().await.settings.check_updates {
+        return Ok(None);
+    }
+    Ok(crate::update::newer_release(env!("CARGO_PKG_VERSION"))
+        .await
+        .ok()
+        .flatten())
+}
+
+/// Opens one of two fixed project pages; the frontend never supplies an address.
+#[tauri::command]
+pub fn open_github_page(app: AppHandle, target: String) -> CommandResult<()> {
+    let url = match target.as_str() {
+        "repo" => crate::update::REPO_URL,
+        "release" => crate::update::RELEASES_URL,
+        _ => return public(Err(AppError::InvalidInput)),
+    };
+    public(
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|_| AppError::Operation),
+    )
+}
+
 #[tauri::command]
 pub fn open_civitai_url(app: AppHandle, url: String) -> CommandResult<()> {
     public(open_civitai_url_inner(&app, &url))
@@ -467,10 +533,14 @@ pub async fn reset_cached_data(
 async fn reset_cached_data_inner(app: &AppHandle, runtime: &AppRuntime) -> AppResult<AppSnapshot> {
     {
         let mut data = runtime.data.write().await;
+        // The ledger prevents duplicate THANKS comments, so it survives a cache reset.
+        let ledger = std::mem::take(&mut data.thanks_ledger);
         sync::reset_account_state(&mut data);
+        data.thanks_ledger = ledger;
         runtime.persist(&data)?;
     }
-    sync::emit_state(app, runtime, None).await
+    // The key is untouched: reload account, Buzz and notifications right away.
+    sync::synchronize(app, runtime, "cache-reset").await
 }
 
 #[tauri::command]
@@ -558,6 +628,23 @@ mod tests {
             serde_json::to_string(&PreferencesBackup::new(&crate::model::Settings::default()))
                 .unwrap();
         assert!(validate_backup_json(&valid).is_ok());
+    }
+
+    #[test]
+    fn backup_round_trips_every_setting_and_accepts_older_exports() {
+        let mut settings = Settings::default();
+        settings.thanks_enabled = true;
+        settings.thanks_message = "cheers!".into();
+        settings.check_updates = false;
+        settings.thread_responses_enabled = false;
+        settings.notification_types.articles = false;
+        let json = serde_json::to_string(&PreferencesBackup::new(&settings)).unwrap();
+        assert_eq!(validate_backup_json(&json).unwrap(), settings);
+
+        // An export from 1.0.26 has none of the newer fields: they take their defaults.
+        let old = r#"{"type":"civitai-companion-desktop-settings","version":1,"exportedAt":"2026-10-15T00:00:00.000Z","settings":{"pollingMinutes":5.0}}"#;
+        let imported = validate_backup_json(old).unwrap();
+        assert!(!imported.thanks_enabled && imported.check_updates);
     }
 
     #[test]

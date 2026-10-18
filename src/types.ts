@@ -24,6 +24,8 @@ export interface Settings {
   startWithWindows: boolean;
   closeToTray: boolean;
   thanksMessage: string;
+  thanksEnabled: boolean;
+  checkUpdates: boolean;
 }
 
 export interface SettingsPatch {
@@ -35,6 +37,8 @@ export interface SettingsPatch {
   startWithWindows?: boolean;
   closeToTray?: boolean;
   thanksMessage?: string;
+  thanksEnabled?: boolean;
+  checkUpdates?: boolean;
 }
 
 export interface PermissionStatus {

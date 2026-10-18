@@ -102,11 +102,41 @@ export class CompanionApp {
       if (soundId) void playSound(soundId).catch(() => undefined);
     });
     window.addEventListener("resize", () => this.fitBuzzStack());
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "F3") event.preventDefault(); // no WebView find bar
+      // F5 keeps the native page reload and also asks Civitai for new notifications.
+      if (event.key === "F5") void backend.sync().catch(() => undefined);
+    });
     this.render();
+    // Once per launch; silent unless a newer release exists.
+    void backend.checkForUpdate().then((version) => version && this.showUpdateCard(version)).catch(() => undefined);
   }
+
+  private showUpdateCard(version: string): void {
+    const card = element("aside", "update-card");
+    card.setAttribute("role", "status");
+    card.append(
+      element("strong", "", `Version ${version} is available`),
+      element("small", "", `You are running ${this.snapshot.appVersion}.`),
+    );
+    const actions = element("div", "update-card-actions");
+    actions.append(
+      button("secondary", "Maybe later", () => card.remove()),
+      button("primary", "Go to GitHub", () => {
+        void backend.openGithubPage("release").catch((error) => this.showNotice(this.errorMessage(error), true));
+        card.remove();
+      }),
+    );
+    card.append(actions);
+    document.body.append(card);
+  }
+
+  private subviewScroll = { key: "", top: 0 };
 
   private render(): void {
     this.captureScrollPosition();
+    const subview = this.root.querySelector<HTMLElement>(".subview");
+    if (subview) this.subviewScroll.top = subview.scrollTop;
     this.root.replaceChildren();
     const shell = element("main", "shell");
     shell.append(this.renderTitleBar());
@@ -118,6 +148,12 @@ export class CompanionApp {
     shell.append(content);
 
     this.root.append(shell);
+    // Settings and Buzz pages scroll as a whole: keep the position while the same page re-renders.
+    const key = `${this.view}:${this.settingsPage}`;
+    const scrolled = this.root.querySelector<HTMLElement>(".subview");
+    if (scrolled && key === this.subviewScroll.key) scrolled.scrollTop = this.subviewScroll.top;
+    else this.subviewScroll.top = 0;
+    this.subviewScroll.key = scrolled ? key : "";
     this.restoreScrollPosition();
     this.fitBuzzStack();
   }
@@ -220,6 +256,7 @@ export class CompanionApp {
     const toolbar = element("nav", "filterbar");
     for (const item of FILTERS) {
       const control = button(`filter-button${this.filter === item.id ? " active" : ""}`, "", () => {
+        if (this.filter === item.id) return;
         this.filter = item.id;
         this.render();
       });
@@ -258,8 +295,26 @@ export class CompanionApp {
     } else {
       for (const item of filtered) list.append(this.renderNotification(item));
     }
-    view.append(list);
+    view.append(this.withScrollTopButton(list, "notifications:"));
     return view;
+  }
+
+  /** Wraps a scrolling list with a "back to top" button that also resets the saved position of every list sharing `prefix`. */
+  private withScrollTopButton(list: HTMLElement, prefix: string): HTMLElement {
+    const frame = element("div", "scroll-frame");
+    const top = iconButton("Back to top", "", () => {
+      for (const key of [...this.scrollPositions.keys()]) {
+        if (key.startsWith(prefix)) this.scrollPositions.delete(key);
+      }
+      list.scrollTo({ top: 0, behavior: "smooth" });
+    });
+    top.classList.add("scroll-top");
+    top.append(element("span", "icon-arrow-up"));
+    const update = () => top.classList.toggle("visible", list.scrollTop > 120);
+    list.addEventListener("scroll", update, { passive: true });
+    requestAnimationFrame(update);
+    frame.append(list, top);
+    return frame;
   }
 
   private renderAccountSummary(): HTMLElement {
@@ -319,7 +374,7 @@ export class CompanionApp {
         void this.loadBuzzTransactions(false);
       });
       buzz.title = buzzBalanceTooltip(balances);
-      buzz.setAttribute("aria-label", "Open Buzz transactions");
+      buzz.setAttribute("aria-label", "Open Buzz Dashboard");
       balances.forEach((balance, index) => {
         if (index > 0) buzz.append(element("span", "buzz-separator"));
         buzz.append(this.statLine(formatCompactBuzz(balance.value), balance.kind));
@@ -339,10 +394,13 @@ export class CompanionApp {
 
   private renderBuzzTransactions(): HTMLElement {
     const view = element("div", "subview buzz-ledger-view");
-    view.append(this.viewHeading("Buzz transactions", "Previous and current month", () => {
+    const dashboardLink = iconButton("Open Buzz Dashboard on Civitai", "", () => void this.open("https://civitai.red/user/buzz-dashboard"));
+    dashboardLink.classList.add("heading-link");
+    dashboardLink.append(element("span", "icon-link"));
+    view.append(this.viewHeading("Buzz Dashboard", "Previous and current month", () => {
       this.view = "notifications";
       this.render();
-    }));
+    }, dashboardLink));
 
     const tabs = element("div", "buzz-account-tabs");
     tabs.setAttribute("role", "tablist");
@@ -388,7 +446,7 @@ export class CompanionApp {
         list.append(more);
       }
     }
-    view.append(list);
+    view.append(this.withScrollTopButton(list, "buzz:"));
     return view;
   }
 
@@ -396,12 +454,8 @@ export class CompanionApp {
     const kind = this.buzzAccountType;
     const row = element("div", `buzz-balance ${kind}`);
     row.append(element("span", "icon-bolt"));
-    const copy = element("span", "buzz-balance-copy");
-    copy.append(
-      element("small", "", `${buzzKindLabel(kind)} Buzz balance`),
-      element("strong", "", formatExactBuzz(this.snapshot.buzz[kind])),
-    );
-    row.append(copy);
+    row.title = `${buzzKindLabel(kind)} Buzz balance`;
+    row.append(element("strong", "", formatExactBuzz(this.snapshot.buzz[kind])));
     return row;
   }
 
@@ -435,6 +489,12 @@ export class CompanionApp {
         loadCivitaiImage(image, item.thumbnailUrl, () => image.remove());
       }
       card.append(preview);
+    } else if (item.kind === "Sell") {
+      // The API names the cosmetic but gives no image for it, so a shop icon stands in.
+      const shop = element("span", "buzz-transaction-preview shop");
+      shop.title = "Cosmetic sale";
+      shop.append(element("span", "icon-shop"));
+      card.append(shop);
     }
     return card;
   }
@@ -498,7 +558,7 @@ export class CompanionApp {
     const meta = element("span", "notification-meta");
     meta.append(element("span", "notification-age", relativeTime(item.createdAt)));
     if (item.commentPreview) meta.append(element("span", "comment-preview", `· “${item.commentPreview}”`));
-    if (item.tipImageId && item.tipUserId) meta.append(this.renderThanksButton(item));
+    if (this.snapshot.settings.thanksEnabled && item.tipImageId && item.tipUserId) meta.append(this.renderThanksButton(item));
     body.append(meta);
     row.append(body);
 
@@ -576,6 +636,9 @@ export class CompanionApp {
     const kind = item.type.toLowerCase();
     const category = item.category.toLowerCase();
     if (kind.startsWith("sticker-placement-") && (kind.endsWith("-pending") || kind.endsWith("-resolved"))) return "icon-sticker";
+    if (kind.startsWith("remix-gallery-")) return "icon-remix";
+    if (kind.startsWith("crucible-")) return "icon-swords";
+    if (kind.includes("article")) return "icon-article";
     if (kind === "collection-update") return "icon-collection";
     if (isModelUpdateNotification(item)) return "icon-model-grid";
     if (kind === "followed-by") return "icon-user";
@@ -716,7 +779,13 @@ export class CompanionApp {
       ));
     }
     panel.append(element("h3", "section-title", "Thank-you comment"));
-    panel.append(element("p", "help", "The THANKS button on a Buzz tip posts “@username” followed by this text on the tipped image, once per user and image. It needs the SocialWrite permission on your API key. Civitai limits comments to about 10 per hour."));
+    panel.append(this.toggleRow(
+      "THANKS button",
+      "Off by default. Adds a button on Buzz tips that posts “@username” followed by the text below, once per user and image. Needs the SocialWrite permission on your API key.",
+      this.snapshot.settings.thanksEnabled,
+      (checked) => void this.saveSettings({ thanksEnabled: checked }),
+    ));
+    panel.append(element("p", "help warning", "Warning: Civitai limits comments (about 10 per hour and 40 per day). Using THANKS too often gets your comments blocked by the API."));
     const thanks = element("input", "text-input");
     thanks.type = "text";
     thanks.maxLength = 300;
@@ -732,6 +801,11 @@ export class CompanionApp {
       }
     });
     panel.append(thanks);
+    const already = element("div", "field-row");
+    const alreadyCopy = element("span");
+    alreadyCopy.append(element("strong", "", "Mark all tips as thanked"), element("small", "", "For tips you already thanked by hand on the site (tips in the current list)"));
+    already.append(alreadyCopy, button("secondary mini-button", "Mark", () => void this.run(() => backend.markAllTipsThanked())));
+    panel.append(already);
     panel.append(element("h3", "section-title", "Event sounds"));
     panel.append(this.soundRow("Site activity", "siteActivity"));
     panel.append(this.soundRow("Buzz tips", "tips"));
@@ -794,6 +868,12 @@ export class CompanionApp {
       "Launch minimized with Windows. Disabled by default.",
       this.snapshot.settings.startWithWindows,
       (checked) => void this.saveSettings({ startWithWindows: checked }),
+    ));
+    panel.append(this.toggleRow(
+      "Check for updates",
+      "Looks for a newer release on GitHub once when the app starts. Nothing is downloaded or installed.",
+      this.snapshot.settings.checkUpdates,
+      (checked) => void this.saveSettings({ checkUpdates: checked }),
     ));
     if (import.meta.env.VITE_TEST_PANEL === "1") {
       const testPanel = element("div", "field-row");
@@ -907,17 +987,26 @@ export class CompanionApp {
     copy.append(element("small", "", "Created by"), element("strong", "", "Tar_Tarj"));
     credit.append(avatar, copy);
     panel.append(credit);
-    panel.append(element("p", "help", "A local-only Windows companion. No telemetry, analytics, browser injection, remote companion server or automatic updater is included."));
+    const github = button("about-credit about-github", "", () => {
+      void backend.openGithubPage("repo").catch((error) => this.showNotice(this.errorMessage(error), true));
+    });
+    github.title = "Open the project on GitHub";
+    const githubCopy = element("span", "about-credit-copy");
+    githubCopy.append(element("small", "", "Source code"), element("strong", "", "Tar-Tarj/Civitai-companion"));
+    github.append(element("span", "icon-github"), githubCopy);
+    panel.append(github);
+    panel.append(element("p", "help", "A local-only Windows companion. No telemetry, analytics, browser injection, remote companion server or automatic installer is included. It can look for a newer GitHub release once at startup (Settings > Behavior)."));
     panel.append(element("p", "help", "Authenticated network traffic is restricted to approved Civitai HTTPS endpoints. The interface receives state and permission information, never the API key."));
     return panel;
   }
 
-  private viewHeading(title: string, subtitle: string, back: () => void): HTMLElement {
+  private viewHeading(title: string, subtitle: string, back: () => void, trailing?: HTMLElement): HTMLElement {
     const heading = element("div", "view-heading");
     heading.append(iconButton("Back", "‹", back));
     const copy = element("div");
     copy.append(element("h1", "", title), element("p", "", subtitle));
     heading.append(copy);
+    if (trailing) heading.append(trailing);
     return heading;
   }
 
@@ -928,7 +1017,13 @@ export class CompanionApp {
   }
 
   private async saveSettings(patch: Parameters<typeof backend.updateSettings>[0]): Promise<void> {
-    await this.run(() => backend.updateSettings(patch));
+    if (await this.run(() => backend.updateSettings(patch))) this.showSaved();
+  }
+
+  private showSaved(): void {
+    const saved = element("div", "saved-toast", "SAVED!");
+    document.body.append(saved);
+    window.setTimeout(() => saved.remove(), 200);
   }
 
   private async open(url: string): Promise<void> {
@@ -942,20 +1037,23 @@ export class CompanionApp {
   private runQueue: Promise<void> = Promise.resolve();
 
   // Serialized so an action fired during another one (e.g. mark-as-read during a sync) waits instead of being dropped.
-  private run(action: () => Promise<AppSnapshot>): Promise<void> {
-    this.runQueue = this.runQueue.then(() => this.runNow(action));
-    return this.runQueue;
+  private run(action: () => Promise<AppSnapshot>): Promise<boolean> {
+    const result = this.runQueue.then(() => this.runNow(action));
+    this.runQueue = result.then(() => undefined);
+    return result;
   }
 
   private async runNow(
     action: () => Promise<AppSnapshot>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.busy = true;
     this.render();
     try {
       this.snapshot = await action();
+      return true;
     } catch (error) {
       this.showNotice(this.errorMessage(error), true);
+      return false;
     } finally {
       this.busy = false;
       this.render();

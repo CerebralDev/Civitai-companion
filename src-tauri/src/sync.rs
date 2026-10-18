@@ -157,7 +157,7 @@ async fn perform_sync(
         client.get_identity(),
     )?;
 
-    let (tracker, settings, previous_buzz, previous_items, prior_daily) = {
+    let (tracker, settings, previous_buzz, previous_items, prior_daily, last_success) = {
         let data = runtime.data.read().await;
         (
             data.notification_tracker.clone(),
@@ -165,6 +165,7 @@ async fn perform_sync(
             data.buzz.clone(),
             data.notifications.items.clone(),
             data.daily_tracker.clone(),
+            data.sync.last_success.clone(),
         )
     };
     let mut all_items = first_page.items;
@@ -208,7 +209,12 @@ async fn perform_sync(
     let new_items = if baseline {
         Vec::new()
     } else {
-        announceable_items(&all_items, &known, &settings, cutoff)
+        announceable_items(
+            &all_items,
+            &known,
+            &settings,
+            announce_since(cutoff, last_success),
+        )
     };
     let known_ids = merge_known_ids(&tracker.known_ids, &all_items);
     let filtered = all_items
@@ -301,8 +307,18 @@ pub async fn test_connection() -> AppResult<(String, Option<i64>)> {
     Ok((identity.username, identity.token_scope))
 }
 
-/// Items worth a toast and a sound: unseen, in an enabled group, and inside the visible window.
-/// Paging deeper as the window slides surfaces unseen notifications older than `cutoff`; they are
+/// Oldest creation time worth a toast: the server sometimes re-serves old notifications that are not in
+/// `known_ids`, so only items created since the previous successful sync (30 min of slack) count as new.
+fn announce_since(cutoff: DateTime<Utc>, last_success: Option<String>) -> DateTime<Utc> {
+    last_success
+        .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+        .map_or(cutoff, |time| {
+            cutoff.max(time.with_timezone(&Utc) - chrono::Duration::minutes(30))
+        })
+}
+
+/// Items worth a toast and a sound: unseen, in an enabled group, and created at or after `cutoff`.
+/// Paging deeper as the window slides surfaces unseen notifications older than the window; they are
 /// not listed, so announcing them would show events the user cannot find.
 fn announceable_items(
     all_items: &[FetchedNotification],
@@ -655,6 +671,16 @@ mod tests {
         let announced = announceable_items(&fetched, &known, &Settings::default(), cutoff);
         assert_eq!(announced.len(), 1);
         assert_eq!(announced[0].id, "fresh");
+    }
+
+    #[test]
+    fn announcements_start_at_the_previous_sync() {
+        let cutoff = Utc::now() - chrono::Duration::days(NOTIFICATION_LOOKBACK_DAYS);
+        let last = Utc::now() - chrono::Duration::hours(1);
+        let since = announce_since(cutoff, Some(last.to_rfc3339()));
+        assert_eq!(since, last - chrono::Duration::minutes(30));
+        assert_eq!(announce_since(cutoff, None), cutoff);
+        assert_eq!(announce_since(cutoff, Some("garbage".into())), cutoff);
     }
 
     #[test]

@@ -92,7 +92,7 @@ The Civitai API key is stored as `Civitai Companion Desktop / civitai-api-key` t
 Non-secret state is stored as an atomic, versioned `state-v1.json` file in the per-user application local-data directory.
 Preference exports contain only the versioned `Settings` structure and are written atomically to the user's Downloads directory. Imports are limited to 1 MiB and preserve the current Start with Windows setting.
 
-No automatic migration from the extension is performed. No updater, telemetry, analytics, browsing data, cookies or browser bridge is included.
+No automatic migration from the extension is performed. No automatic installer, telemetry, analytics, browsing data, cookies or browser bridge is included. The only non-Civitai request is an optional, unauthenticated lookup of the latest GitHub release once at startup (Settings > Behavior), which downloads nothing.
 
 ## Source availability
 

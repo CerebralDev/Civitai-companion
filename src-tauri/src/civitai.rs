@@ -179,6 +179,58 @@ impl CivitaiClient {
             }
         }
 
+        // Models, versions, articles, posts and bounties have a cover image behind the same procedure.
+        let mut entities = items
+            .iter()
+            .filter(|item| item.public.thumbnail_url.is_none())
+            .filter_map(|item| cover_entity(&item.public.kind, &item.details))
+            .collect::<Vec<_>>();
+        entities.sort_unstable();
+        entities.dedup();
+        entities.truncate(30);
+        if !entities.is_empty()
+            && let Ok(payload) = self
+                .trpc_call(
+                    "image.getEntitiesCoverImage",
+                    Some(json!({
+                        "entities": entities
+                            .iter()
+                            .map(|(kind, id)| json!({ "entityType": kind, "entityId": id }))
+                            .collect::<Vec<_>>()
+                    })),
+                    None,
+                )
+                .await
+        {
+            for image in payload.as_array().into_iter().flatten() {
+                let Some((kind, id)) = string(image, "entityType").zip(integer(image, "entityId"))
+                else {
+                    continue;
+                };
+                let Some(url) = image_delivery_url(image) else {
+                    continue;
+                };
+                for item in items.iter_mut().filter(|item| {
+                    item.public.thumbnail_url.is_none()
+                        && cover_entity(&item.public.kind, &item.details).is_some_and(
+                            |(wanted, wanted_id)| {
+                                wanted.eq_ignore_ascii_case(&kind) && wanted_id == id
+                            },
+                        )
+                }) {
+                    item.public.thumbnail_url = Some(url.clone());
+                    item.public.thumbnail_kind = Some(
+                        if is_video_media(image) {
+                            "video"
+                        } else {
+                            "image"
+                        }
+                        .into(),
+                    );
+                }
+            }
+        }
+
         let follower_ids = items
             .iter()
             .filter(|item| item.public.kind == "followed-by" && item.public.thumbnail_url.is_none())
@@ -633,8 +685,16 @@ fn normalize_buzz_transaction(
     } else {
         raw_amount.abs()
     };
-    let kind = buzz_transaction_kind(row.get("type"));
+    let mut kind = buzz_transaction_kind(row.get("type"));
     let details = row.get("details").filter(|value| value.is_object());
+    if kind == "Reward" {
+        // Rewards for your content are named by `details.type`, e.g. "goodContent:image".
+        match details.and_then(|value| string(value, "type")).as_deref() {
+            Some(reward) if reward.starts_with("goodContent") => kind = "Liked".into(),
+            Some(reward) if reward.starts_with("collectedContent") => kind = "Collected".into(),
+            _ => {}
+        }
+    }
     let counterparty = if is_debit {
         nested_string(row, &["toUser", "username"])
     } else {
@@ -798,15 +858,27 @@ fn present_notification(
                 .unwrap_or_else(|| "Collection update".into());
         }
         url = collection_url(details).or(url);
-    } else if kind_lower.starts_with("sticker-placement-") && kind_lower.ends_with("-pending") {
+    } else if let Some(placements) = placement_pending_url(&kind_lower) {
         if text.is_empty() {
             let actor = string(details, "placerUsername").or_else(|| username.clone());
             text = format!(
-                "{}: Sticker Placement Pending",
-                actor.as_deref().unwrap_or("A user")
+                "{}: {} Pending",
+                actor.as_deref().unwrap_or("A user"),
+                humanize(kind_lower.trim_end_matches("-pending"))
             );
         }
+        url = civitai_red_url(placements);
+    } else if matches!(
+        kind_lower.as_str(),
+        "sticker-placement-resolved" | "remix-gallery-resolved"
+    ) {
         url = image_url(details).or(url);
+    }
+
+    if kind_lower.starts_with("crucible-")
+        && let Some(name) = string(details, "crucibleName")
+    {
+        text = format!("{} · {name}", humanize(kind));
     }
 
     let model_name = string(details, "modelName").unwrap_or_default();
@@ -870,7 +942,8 @@ fn present_notification(
     url = url
         .or_else(|| model_url(details))
         .or_else(|| article_url(details))
-        .or_else(|| collection_url(details));
+        .or_else(|| collection_url(details))
+        .or_else(|| fallback_url(&kind_lower, details));
     if text.is_empty() {
         text = humanize(kind);
         if let Some(name) = username.as_deref() {
@@ -962,6 +1035,58 @@ fn picture_url(profile: &Value) -> Option<String> {
         return raw_image_delivery_url(raw, "avatar");
     }
     image_delivery_url(picture)
+}
+
+/// Pending placements are decided in the placements panel, one page per placement type.
+fn placement_pending_url(kind: &str) -> Option<&'static str> {
+    if !kind.ends_with("-pending") {
+        return None;
+    }
+    if kind.starts_with("sticker-placement-") {
+        Some("/user/placements?type=sticker")
+    } else if kind == "remix-gallery-pending" {
+        Some("/user/placements?type=remix")
+    } else {
+        None
+    }
+}
+
+/// Entity whose cover image previews a notification that carries no image of its own.
+fn cover_entity(kind: &str, details: &Value) -> Option<(&'static str, i64)> {
+    let id = |key: &str| integer(details, key).filter(|id| *id > 0);
+    if kind.eq_ignore_ascii_case("new-model-version") {
+        id("modelVersionId").map(|id| ("ModelVersion", id))
+    } else if kind.eq_ignore_ascii_case("early-access-complete") {
+        id("versionId").map(|id| ("ModelVersion", id))
+    } else {
+        id("modelId")
+            .map(|id| ("Model", id))
+            .or_else(|| id("articleId").map(|id| ("Article", id)))
+            .or_else(|| id("postId").map(|id| ("Post", id)))
+            .or_else(|| id("bountyId").map(|id| ("Bounty", id)))
+    }
+}
+
+/// Page for notifications whose details name only an image, post, bounty, crucible or the Beggars Board.
+fn fallback_url(kind: &str, details: &Value) -> Option<String> {
+    let id = |key: &str| integer(details, key).filter(|id| *id > 0);
+    let path = if let Some(id) = id("imageId") {
+        format!("/images/{id}")
+    } else if let Some(id) = id("postId") {
+        format!("/posts/{id}")
+    } else if let Some(id) = id("bountyEntryId") {
+        format!("/bounties/entries/{id}")
+    } else if let Some(id) = id("bountyId") {
+        format!("/bounties/{id}")
+    } else if let Some(id) = id("crucibleId") {
+        format!("/crucibles/{id}")
+    } else if kind == "beggars-board-expired" {
+        // The payload is empty; the board is the collection named in its accepted/rejected notifications.
+        "/collections/3870938".into()
+    } else {
+        return None;
+    };
+    civitai_red_url(&path)
 }
 
 fn image_url(details: &Value) -> Option<String> {
@@ -1185,6 +1310,97 @@ mod tests {
     }
 
     #[test]
+    fn placements_link_to_the_panel_when_pending_and_to_the_image_when_resolved() {
+        let url = |kind: &str| {
+            normalize_notification(json!({
+                "id": 1, "type": kind, "category": "Creator",
+                "details": { "imageId": 99, "placerUsername": "someone" }
+            }))
+            .unwrap()
+            .public
+            .url
+        };
+        assert_eq!(
+            url("remix-gallery-pending").as_deref(),
+            Some("https://civitai.red/user/placements?type=remix")
+        );
+        assert_eq!(
+            url("sticker-placement-pending").as_deref(),
+            Some("https://civitai.red/user/placements?type=sticker")
+        );
+        for kind in ["remix-gallery-resolved", "sticker-placement-resolved"] {
+            assert_eq!(url(kind).as_deref(), Some("https://civitai.red/images/99"));
+        }
+    }
+
+    #[test]
+    fn orphan_notifications_get_a_page_and_a_cover_entity() {
+        let page = |kind: &str, details: Value| {
+            normalize_notification(
+                json!({ "id": 1, "type": kind, "category": "x", "details": details }),
+            )
+            .unwrap()
+            .public
+            .url
+        };
+        let red = |path: &str| Some(format!("https://civitai.red{path}"));
+        assert_eq!(
+            page("featured-image", json!({ "imageId": 5 })),
+            red("/images/5")
+        );
+        assert_eq!(
+            page("new-post-comment", json!({ "postId": 6 })),
+            red("/posts/6")
+        );
+        assert_eq!(
+            page("crucible-won", json!({ "crucibleId": 4 })),
+            red("/crucibles/4")
+        );
+        assert_eq!(
+            page("crucible-ending-soon", json!({ "crucibleId": 4 })),
+            red("/crucibles/4")
+        );
+        assert_eq!(
+            page("bounty-entry", json!({ "bountyId": 1, "bountyEntryId": 2 })),
+            red("/bounties/entries/2")
+        );
+        assert_eq!(
+            page("beggars-board-expired", json!({})),
+            red("/collections/3870938")
+        );
+        assert_eq!(
+            page("sticker-placement-free-pending", json!({ "imageId": 5 })),
+            red("/user/placements?type=sticker")
+        );
+        assert_eq!(page("new-order-smite-received", json!({})), None);
+        let crucible = normalize_notification(json!({
+            "id": 1, "type": "crucible-ending-soon", "category": "Update",
+            "details": { "crucibleId": 4, "crucibleName": "Western" }
+        }))
+        .unwrap();
+        assert_eq!(crucible.public.text, "Crucible Ending Soon · Western");
+        assert_eq!(
+            cover_entity(
+                "new-model-version",
+                &json!({ "modelId": 1, "modelVersionId": 9 })
+            ),
+            Some(("ModelVersion", 9))
+        );
+        assert_eq!(
+            cover_entity("new-article-from-following", &json!({ "articleId": 3 })),
+            Some(("Article", 3))
+        );
+        assert_eq!(
+            cover_entity("bounty-entry", &json!({ "bountyId": 7 })),
+            Some(("Bounty", 7))
+        );
+        assert_eq!(
+            cover_entity("crucible-won", &json!({ "crucibleId": 4 })),
+            None
+        );
+    }
+
+    #[test]
     fn notification_text_is_bounded_and_urls_are_safe() {
         let item = normalize_notification(json!({
             "id": 7,
@@ -1381,6 +1597,28 @@ mod tests {
         let serialized = serde_json::to_string(&page).unwrap();
         assert!(!serialized.contains("authorization"));
         assert!(!serialized.contains("must-not-cross-boundary"));
+    }
+
+    #[test]
+    fn content_rewards_are_split_into_liked_and_collected() {
+        let kind = |reward: serde_json::Value| {
+            normalize_buzz_transaction(
+                &json!({
+                    "date": "2026-09-13T01:02:03.000Z", "type": 5, "amount": 2,
+                    "toAccountId": 42, "details": reward
+                }),
+                BuzzAccountType::Blue,
+                Some(42),
+            )
+            .unwrap()
+            .kind
+        };
+        assert_eq!(kind(json!({ "type": "goodContent:image" })), "Liked");
+        assert_eq!(
+            kind(json!({ "type": "collectedContent:image" })),
+            "Collected"
+        );
+        assert_eq!(kind(json!({ "type": "firstDailyPost" })), "Reward");
     }
 
     #[test]

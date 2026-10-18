@@ -38,6 +38,9 @@ export const backend = {
   exportPreferences: (): Promise<string> => invoke("export_preferences"),
   importPreferences: (json: string): Promise<AppSnapshot> =>
     invoke("import_preferences", { json }),
+  markAllTipsThanked: (): Promise<AppSnapshot> => invoke("mark_all_tips_thanked"),
+  checkForUpdate: (): Promise<string | null> => invoke("check_for_update"),
+  openGithubPage: (target: "repo" | "release"): Promise<void> => invoke("open_github_page", { target }),
   resetCache: (): Promise<AppSnapshot> => invoke("reset_cached_data"),
   clearAccount: (): Promise<AppSnapshot> => invoke("clear_account_data"),
   onStateChanged: (handler: (event: StateEvent) => void): Promise<UnlistenFn> =>

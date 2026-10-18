@@ -119,6 +119,12 @@ pub struct Settings {
     /// Text after the leading @user in a thanks comment.
     #[serde(default = "default_thanks_message")]
     pub thanks_message: String,
+    /// The THANKS button is hidden unless this is on: Civitai rate-limits comments.
+    #[serde(default)]
+    pub thanks_enabled: bool,
+    /// One GitHub release lookup at startup; nothing is downloaded.
+    #[serde(default = "default_true")]
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -132,6 +138,8 @@ impl Default for Settings {
             start_with_windows: false,
             close_to_tray: true,
             thanks_message: default_thanks_message(),
+            thanks_enabled: false,
+            check_updates: true,
         }
     }
 }
@@ -178,6 +186,8 @@ pub struct SettingsPatch {
     pub start_with_windows: Option<bool>,
     pub close_to_tray: Option<bool>,
     pub thanks_message: Option<String>,
+    pub thanks_enabled: Option<bool>,
+    pub check_updates: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -203,6 +213,8 @@ impl SettingsPatch {
             thanks_message: self
                 .thanks_message
                 .unwrap_or_else(|| current.thanks_message.clone()),
+            thanks_enabled: self.thanks_enabled.unwrap_or(current.thanks_enabled),
+            check_updates: self.check_updates.unwrap_or(current.check_updates),
         }
         .validate()
     }

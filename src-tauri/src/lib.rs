@@ -9,6 +9,8 @@ mod model;
 mod security;
 mod storage;
 mod sync;
+mod update;
+mod window_size;
 
 #[cfg(test)]
 mod security_contract;
@@ -50,6 +52,9 @@ pub fn run() {
             commands::update_settings,
             commands::mark_notification_read,
             commands::send_thanks,
+            commands::check_for_update,
+            commands::open_github_page,
+            commands::mark_all_tips_thanked,
             #[cfg(feature = "test-panel")]
             commands::open_test_panel,
             #[cfg(feature = "test-panel")]
@@ -87,10 +92,18 @@ pub fn run() {
             if std::env::args().any(|argument| argument == "--minimized") {
                 window_config.visible = false;
             }
-            WebviewWindowBuilder::from_config(app, &window_config)?
+            let window = WebviewWindowBuilder::from_config(app, &window_config)?
                 .on_navigation(security::is_allowed_webview_navigation)
                 .on_new_window(|_, _| NewWindowResponse::Deny)
                 .build()?;
+            // The size the window really opens with is also its minimum (the config minimum ended up a few px smaller).
+            if let Ok(size) = window.inner_size() {
+                let _ = window.set_min_size(Some(size));
+            }
+            if let Some((width, height)) = window_size::load(app.handle()) {
+                let _ = window.set_size(tauri::LogicalSize::new(width, height));
+                let _ = window.center();
+            }
 
             let show =
                 MenuItem::with_id(app, "show", "Show Civitai Companion", true, None::<&str>)?;
@@ -139,6 +152,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, WindowEvent::Resized(_)) {
+                window_size::save(window);
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let runtime = window.state::<Arc<AppRuntime>>();
                 if window.label() == "main" && runtime.close_to_tray() {

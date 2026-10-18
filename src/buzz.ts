@@ -55,7 +55,7 @@ export function fitBuzzFontSize(available: number, widthAt: (fontPx: number) => 
 
 export function buzzBalanceTooltip(balances: ReadonlyArray<VisibleBuzzBalance>): string {
   const parts = balances.map(({ kind, value }) => `${buzzKindLabel(kind)} ${formatExactBuzz(value)}`);
-  return [...parts, "Buzz transactions"].join(" \u00b7 ");
+  return [...parts, "Buzz Dashboard"].join(" \u00b7 ");
 }
 
 export function visibleBuzzBalances(buzz: AppSnapshot["buzz"]): VisibleBuzzBalance[] {

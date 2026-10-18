@@ -24,7 +24,8 @@ export function isSubmissionUpdateNotification(
   const category = item.category.toLowerCase();
   return kind !== "followed-by"
     && !isModelUpdateNotification(item)
-    && (category === "update" || category === "bounty" || SUBMISSION_UPDATE_TYPES.has(kind));
+    && (category === "update" || category === "bounty" || SUBMISSION_UPDATE_TYPES.has(kind)
+      || kind.startsWith("sticker-placement-") || kind.startsWith("remix-gallery-"));
 }
 
 export function notificationMatchesFilter(

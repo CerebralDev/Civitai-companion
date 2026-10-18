@@ -19,6 +19,9 @@ fn capability_exposes_only_required_window_and_state_controls() {
         "allow-update-settings",
         "allow-mark-notification-read",
         "allow-send-thanks",
+        "allow-check-for-update",
+        "allow-open-github-page",
+        "allow-mark-all-tips-thanked",
         "allow-mark-all-notifications-read",
         "allow-get-buzz-transactions",
         "allow-preview-sound",
@@ -31,7 +34,7 @@ fn capability_exposes_only_required_window_and_state_controls() {
     ] {
         assert!(permissions.iter().any(|permission| permission == required));
     }
-    assert_eq!(permissions.len(), 22);
+    assert_eq!(permissions.len(), 25);
     let serialized = capability.to_string().to_ascii_lowercase();
     for forbidden in ["shell", "filesystem", "fs:", "http:", "process", "opener"] {
         assert!(
